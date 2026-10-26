@@ -1,0 +1,11 @@
+# rc.jobs.rmx3360 plus what os_feature_enabled answers here (24 October 2026): wifid makes no auto-join manager
+# because CoreWiFi/UnifiedAutoJoin reads as disabled, though the stock plist enables it. ff_test is built by hand
+# (xcrun -sdk iphoneos clang src/ff_test.c -o obj/diag/ff_test) and given as EXTRA=obj/diag/ff_test.
+/redwood/bin/sound_test springboard
+/redwood/bin/ff_test CoreWiFi UnifiedAutoJoin CoreWiFi AWDL6E CoreWiFi LinkDownSuppression WiFiPolicy NoSuchFeature
+/redwood/bin/cwf_test
+/redwood/bin/ff_test CoreWiFi UnifiedAutoJoin CoreWiFi AWDL6E CoreWiFi LinkDownSuppression WiFiPolicy NoSuchFeature
+/var/jb/bin/sh /var/jb/prep.sh
+/var/jb/usr/bin/find /System/Library/FeatureFlags -maxdepth 2 -name CoreWiFi* -printf %U:%G:%m:%s:%p\n
+/var/jb/usr/bin/find /System/Library/FeatureFlags /Library/Preferences/FeatureFlags /private/var/preferences/FeatureFlags -maxdepth 1 -printf %U:%G:%m:%s:%p\n
+/redwood/bin/net_test waitaddr en0 120

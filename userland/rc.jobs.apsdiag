@@ -1,0 +1,11 @@
+# rc.jobs.rmx3360 plus a check of the container ACL fix (24 October 2026): is mobileactivationd still
+# trapping in main(), and what do the containers look like (owners, modes)? Run once with boot-arg
+# var_new_containers=1, then once without, to see the ACLs survive var_store.
+# FLASHBOOT=1 CRYPTEXES=flash RC_JOBS=rc.jobs.apsdiag SKIP="kernel loader boot" bash common/build.sh rmx3360 GL=1
+/redwood/bin/sound_test springboard
+/var/jb/bin/sh /var/jb/prep.sh
+/redwood/bin/net_test wait 40
+/var/jb/usr/bin/find /private/var/containers -maxdepth 5 -printf %U:%G:%m:%p\n
+/var/jb/usr/bin/launchctl print user/501/com.apple.mobileactivationd
+/var/jb/usr/bin/launchctl print user/501/com.apple.apsd
+/redwood/bin/net_test waitaddr en0 120

@@ -1,0 +1,13 @@
+# rc.jobs.rmx3360 plus a network check for "Safari stuck loading" (24 October 2026): once en0 has an
+# address, each layer an application uses, one at a time, for a host Safari hung on (example.com) and
+# one it loaded (www.apple.com): configd's DNS servers, getaddrinfo through mDNSResponder, reachability,
+# a plain TCP request, then CFNetwork with TLS. Built like the jb image:
+# FLASHBOOT=1 CRYPTEXES=flash RC_JOBS=rc.jobs.webdiag SKIP="kernel loader boot" bash common/build.sh rmx3360 GL=1
+/redwood/bin/sound_test springboard
+/var/jb/bin/sh /var/jb/prep.sh
+/redwood/bin/net_test waitaddr en0 300
+/redwood/bin/net_test show store State:/Network/Global/DNS
+/redwood/bin/net_test resolve example.com resolve www.apple.com resolve www.google.com
+/redwood/bin/net_test reach example.com reach www.apple.com
+/redwood/bin/net_test tcp example.com 80 tcp www.apple.com 80
+/redwood/bin/net_test fetch http://example.com/ fetch https://example.com/ fetch https://www.apple.com/ fetch https://www.google.com/
