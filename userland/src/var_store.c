@@ -888,7 +888,69 @@ save(void)
 
 /* ---- unpacking ---- */
 
-static uint64_t made_dirs, made_files, made_links, made_bytes, short_files, lost_bytes;
+static uint64_t made_dirs, made_files, made_links, made_bytes, short_files, lost_bytes, made_acls, lost_acls;
+
+/*
+ * An access control list back on path. It was packed as the extended attribute com.apple.system.Security,
+ * which root may read but only a task with the kernel's filesec entitlement may write: a setxattr of it
+ * fails with EPERM, and every ACL used to be lost at the first load (24 October 2026). That cost more than
+ * it looks: iOS makes the directories of a container (containermanagerd) owned by nobody with mode 000 and
+ * lets the owner in through an ACL alone, so after one reboot mobileactivationd could not enter its own
+ * container, trapped in main() on every start, and apsd -- waiting for it -- answered nobody, Safari's
+ * history daemon among them. The ACL goes back the documented way instead, chmod_extended(), which the
+ * owner and root may call. The attribute holds a kauth_filesec in the disk's byte order (big-endian,
+ * bsd/kern/kern_authorization.c, kauth_filesec_acl_setendian); the call takes it in the host's.
+ */
+#define FILESEC_MAGIC           0x012cc16dU     /* KAUTH_FILESEC_MAGIC */
+#define FILESEC_HEAD            44              /* magic, owner and group GUIDs, entry count, flags */
+#define FILESEC_ACE             24              /* applicable GUID, flags, rights */
+#define FILESEC_NOACL           0xffffffffU     /* KAUTH_FILESEC_NOACL: a filesec with no list in it */
+#define NONE_ID                 (~0U - 100)     /* KAUTH_UID_NONE, KAUTH_GID_NONE: leave the owner */
+
+static uint32_t
+from_big(const uint8_t *p)
+{
+	return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
+}
+
+static void
+to_host(uint8_t *p)
+{
+	uint32_t v = from_big(p);
+
+	memcpy(p, &v, sizeof(v));
+}
+
+static void
+restore_acl(uint8_t *fsec, uint32_t size)
+{
+	uint32_t count;
+
+	if (size < FILESEC_HEAD || from_big(fsec) != FILESEC_MAGIC) {
+		lost_acls++;
+		return;
+	}
+	count = from_big(fsec + 36);
+	if (count == FILESEC_NOACL) {
+		return;                 /* owner and group GUIDs only, no list: nothing for the call to put back */
+	}
+	if (size < FILESEC_HEAD + (uint64_t)count * FILESEC_ACE) {
+		lost_acls++;
+		return;
+	}
+	to_host(fsec);                  /* magic */
+	to_host(fsec + 36);             /* entry count */
+	to_host(fsec + 40);             /* flags */
+	for (uint32_t i = 0; i < count; i++) {
+		to_host(fsec + FILESEC_HEAD + i * FILESEC_ACE + 16);    /* the entry's flags */
+		to_host(fsec + FILESEC_HEAD + i * FILESEC_ACE + 20);    /* and its rights */
+	}
+	if (mini_syscall(SYS_chmod_extended, (long)path, NONE_ID, NONE_ID, -1, (long)fsec, 0) == 0) {
+		made_acls++;
+	} else {
+		lost_acls++;
+	}
+}
 /*
  * A belt, after the braces: the memory filesystem no longer answers ENOSPC for want of a page
  * (bsd/miscfs/ramfs, ramfs_grow_slots now takes an array found without the mount lock), so a short
@@ -995,7 +1057,11 @@ unpack_one(int make)
 			break;
 		}
 		name[namelen] = 0;
-		if (make && e.kind != ENT_HARDLINK) {
+		if (make && strcmp(name, "com.apple.system.Security") == 0) {
+			if (e.kind == ENT_DIR || e.kind == ENT_FILE) {
+				restore_acl(value, vlen);       /* (chmod_extended follows links: none on one) */
+			}
+		} else if (make && e.kind != ENT_HARDLINK) {
 			setxattr(path, name, value, vlen, 0, XATTR_NOFOLLOW);
 		}
 	}
@@ -1189,6 +1255,8 @@ load(void)
 	printf("var_store: %llu directories, %llu files (%llu bytes), %llu links back in /private/var\n",
 	    (unsigned long long)made_dirs, (unsigned long long)made_files, (unsigned long long)made_bytes,
 	    (unsigned long long)made_links);
+	printf("var_store: %llu access control lists put back, %llu refused\n", (unsigned long long)made_acls,
+	    (unsigned long long)lost_acls);
 	if (short_files != 0) {
 		printf("var_store: %llu files did not fit: %llu bytes of them are not there\n",
 		    (unsigned long long)short_files, (unsigned long long)lost_bytes);

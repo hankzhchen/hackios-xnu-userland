@@ -1286,17 +1286,23 @@ static void
 load_tuning(struct isp *isp, uint32_t sensor)
 {
 	static const char *const names[] = { "ov02b10", "s5khm2sd", "ov16a1q", "s5k4h7" };
+	static const char *const rmx3360_names[] = { "ov02b", "ov64b", "imx615", "hi846" };      /* (the Realme GT Master's, same order) */
+	const char *const *which = names;
 	char path[96];
 
 	if (sensor >= sizeof(names) / sizeof(names[0])) {
 		return;
 	}
 	snprintf(path, sizeof(path), "/redwood/fw/camera-%s.isp", names[sensor]);
+	if (access(path, R_OK) != 0) {
+		which = rmx3360_names;
+		snprintf(path, sizeof(path), "/redwood/fw/camera-%s.isp", rmx3360_names[sensor]);
+	}
 	if (isp_load_tuning(isp, path)) {
-		say("the %s's colour tuning from %s: %u colour matrices' lights, %u lens shadings'", names[sensor], path,
+		say("the %s's colour tuning from %s: %u colour matrices' lights, %u lens shadings'", which[sensor], path,
 		    isp->tuning->ccm.lights, isp->tuning->lsc.lights);
 	} else {
-		say("no colour tuning for the %s (%s): no colour matrix, no lens shading", names[sensor], path);
+		say("no colour tuning for the %s (%s): no colour matrix, no lens shading", which[sensor], path);
 		isp_set_ccm(isp, (const float[9]){ 1, 0, 0, 0, 1, 0, 0, 0, 1 });
 		isp->lsc.on = false;
 	}

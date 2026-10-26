@@ -1001,6 +1001,41 @@ restore_var(void)
 	}
 }
 
+/*
+ * Boot-arg var_new_containers=1, once: the system containers moved aside (to NAME.noacl) and their
+ * directories left empty, so that containermanagerd makes them again. Until 24 October 2026 var_store
+ * lost every access control list at a load (src/var_store.c, restore_acl), and a container's directories
+ * are owned by nobody with mode 000 and let their owner in by an ACL alone -- so every container in a
+ * store saved since then is one its owner cannot enter (mobileactivationd's first of all). Nothing in
+ * the store can give those ACLs back; containermanagerd, making the containers afresh, does.
+ */
+static void
+fresh_system_containers(void)
+{
+	static const char *const classes[] = {
+		"/private/var/containers/Data/System", "/private/var/containers/Shared/SystemGroup",
+	};
+	const char *wanted = boot_arg("var_new_containers");
+	char aside[256];
+
+	if (wanted == NULL || strcmp(wanted, "1") != 0) {
+		return;
+	}
+	for (size_t i = 0; i < sizeof(classes) / sizeof(classes[0]); i++) {
+		strcpy(aside, classes[i]);                      /* (both names are well under 256) */
+		strcpy(aside + strlen(aside), ".noacl");
+		if (rename(classes[i], aside) != 0) {
+			printf("  %s: not moved aside: %s\n", classes[i], strerror(errno));
+			continue;
+		}
+		if (mkdir(classes[i], 0755) != 0 || chown(classes[i], 0, 0) != 0) {
+			printf("  %s: moved aside, but not made again: %s\n", classes[i], strerror(errno));
+			continue;
+		}
+		printf("  %s: moved aside to %s, empty for containermanagerd\n", classes[i], aside);
+	}
+}
+
 static int
 count_entries(const char *path)
 {
@@ -1443,6 +1478,7 @@ main(int argc, char **argv, char **envp)
 	show_system();
 	mount_writable();
 	restore_var();
+	fresh_system_containers();
 	test_files();
 	test_writable();
 	test_memory();

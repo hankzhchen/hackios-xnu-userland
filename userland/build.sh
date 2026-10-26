@@ -128,8 +128,11 @@ SILEO_BIN="chmod cp mkdir mv rm"
 INJECT=${INJECT-"/redwood/lib/libredwood.dylib backboardd containermanagerd containermanagerd_system
 /redwood/lib/libredwood-sb.dylib SpringBoard
 /redwood/lib/libredwood-media.dylib mediaserverd
-/redwood/lib/libredwood-app.dylib Sileo
+/redwood/lib/libredwood-app.dylib Sileo MobileSafari
+/redwood/lib/libredwood-history.dylib com.apple.Safari.History
 /redwood/lib/libredwood-tweaks.dylib Preferences"}
+# (libredwood-history, src/inject_history.c: Safari's history daemon is kept from waiting for apsd, which
+# otherwise hangs Safari on the first page it would remember.)
 # STOREFRONT=1: and a library of ours inside appstored as well (src/inject_store.c). It is not in the
 # list above because it changes what the daemon believes: AMS's account is made to answer with the
 # storefront Apple's bag server returned for this device, which is how the App Store is asked whether
@@ -299,6 +302,9 @@ if [ -d $IOS/rootfs/usr/lib ]; then
 		# ... and inside an application, to say what killed it (src/inject_app.c)
 		$DYN -dynamiclib -install_name /redwood/lib/libredwood-app.dylib -lobjc \
 			-o obj/libredwood-app.dylib src/inject_app.c
+		# ... and inside Safari's history daemon, which would otherwise wait for apsd for ever (src/inject_history.c)
+		$DYN -dynamiclib -install_name /redwood/lib/libredwood-history.dylib -lobjc \
+			-o obj/libredwood-history.dylib src/inject_history.c
 		$DYN -O2 -dynamiclib -install_name /redwood/lib/libredwood-media.dylib -framework CoreFoundation -framework CoreMedia \
 			-framework CoreVideo -framework IOSurface -lobjc \
 			-o obj/libredwood-media.dylib src/inject_media.c src/camera_device.c src/camera_isp.c
@@ -448,6 +454,7 @@ if [ -d $IOS/rootfs/usr/lib ]; then
 	[ -f obj/libredwood-store.dylib ] && cp obj/libredwood-store.dylib root/lib/
 	[ -f obj/libredwood-fairplay.dylib ] && cp obj/libredwood-fairplay.dylib root/lib/
 	[ -f obj/libredwood-app.dylib ] && cp obj/libredwood-app.dylib root/lib/
+	[ -f obj/libredwood-history.dylib ] && cp obj/libredwood-history.dylib root/lib/
 	[ -f obj/libredwood-tweaks.dylib ] && cp obj/libredwood-tweaks.dylib root/lib/
 	[ -f obj/libredwoodmetal.dylib ] && cp obj/libredwoodmetal.dylib root/lib/
 	[ -f obj/libredwoodair.dylib ] && cp obj/libredwoodair.dylib root/lib/
@@ -554,7 +561,10 @@ fi
 if [ -f ../fw-wifi/wpss.mdt ]; then
 	mkdir -p root/fw
 	install -m 0644 ../fw-wifi/wpss.mdt ../fw-wifi/wpss.b0[2-9] root/fw/
-	for f in bd_m20gl.elf regdb_xiaomi.bin; do
+	# (the POCO X5 Pro's names, then those of Qualcomm's cnss driver that the Realme GT Master's Android
+	# has: bdwlan.eNN by board id, bdwlan.elf for none; the kernel picks, redwood_wifi_board_file())
+	for f in bd_m20gl.elf regdb_xiaomi.bin bdwlan.elf bdwlan.e01 bdwlan.e02 bdwlan.e03 bdwlan.e04 bdwlan.e05 \
+	    bdwlan.e06 bdwlan.e07 regdb.bin; do
 		[ -f ../fw-wifi/qca6750/$f ] && install -m 0644 ../fw-wifi/qca6750/$f root/fw/
 	done
 	# the network the radio is to join: its name on the first line, its passphrase on the second. Yours, and
@@ -579,6 +589,15 @@ for module in ../fw-camera/com.qti.sensormodule.redwood_*.bin; do
 	mkdir -p root/fw
 	../tools/camsensor.py "$module" "root/fw/camera-$sensor.tab" >/dev/null
 done
+# (other phones' module files, without "redwood_": com.qti.sensormodule.[<maker>_]<sensor>[_<lens motor>].bin -- the
+# Realme GT Master's qtech_ov64b_ak7375c, sunny_imx615, truly_hi846 and ov02b)
+for module in ../fw-camera/com.qti.sensormodule.*.bin; do
+	[ -f "$module" ] || continue
+	case "$(basename "$module")" in com.qti.sensormodule.redwood_*) continue ;; esac
+	sensor=$(basename "$module" .bin | sed 's/^com\.qti\.sensormodule\.//; s/^\(qtech\|sunny\|truly\|holitech\|ofilm\|aac\)_//; s/_.*//')
+	mkdir -p root/fw
+	../tools/camsensor.py "$module" "root/fw/camera-$sensor.tab" >/dev/null
+done
 # ... and their colour tuning (libredwood-media's processor, src/camera_isp.c), made by tools/camtuning.py out of the
 # cameras' tuning files beside them, com.qti.tuned.redwood_<maker>_<sensor>_<camera>.bin: camera-<sensor>.isp
 for tuned in ../fw-camera/com.qti.tuned.redwood_*.bin; do
@@ -587,6 +606,21 @@ for tuned in ../fw-camera/com.qti.tuned.redwood_*.bin; do
 	mkdir -p root/fw
 	../tools/camtuning.py "$tuned" "root/fw/camera-$sensor.isp" >/dev/null
 done
+# (other phones' tuning files, without "redwood_": com.qti.tuned.[<maker>_]<sensor>.bin -- the Realme GT Master's)
+for tuned in ../fw-camera/com.qti.tuned.*.bin; do
+	[ -f "$tuned" ] || continue
+	case "$(basename "$tuned")" in com.qti.tuned.redwood_*|com.qti.tuned.default.bin) continue ;; esac
+	sensor=$(basename "$tuned" .bin | sed 's/^com\.qti\.tuned\.//; s/^\(qtech\|sunny\|truly\|holitech\|ofilm\|aac\)_//; s/_.*//')
+	mkdir -p root/fw
+	../tools/camtuning.py "$tuned" "root/fw/camera-$sensor.isp" >/dev/null
+done
+# ... and the Realme GT Master's speaker amplifier's register table (bsd/dev/redwood_tfa9874.c, sound=3 and up with
+# board=rmx3360), made by tools/tfacnt.py out of NXP's container that its Android loads, the phone's
+# tfa98xx.cnt (its driver's request_firmware(); /vendor/firmware), in ../fw-audio (the vendor's: neither it nor the table is in the repository)
+if [ -f ../fw-audio/tfa98xx.cnt ]; then
+	mkdir -p root/fw
+	../tools/tfacnt.py ../fw-audio/tfa98xx.cnt root/fw/tfa9874.tab >/dev/null
+fi
 # ... and with ADSP=1 the image of the audio DSP, from the same place into ../fw-audio (bsd/dev/redwood_adsp.c):
 # adsp.mdt and adsp.b02 to adsp.b36, 20 MB. Only when asked for: beside GL=1 the payload would be more than the 64 MB
 # the loader takes.
@@ -624,6 +658,11 @@ mkdir -p root/empty root/xpc root/hal
 for f in extensions.plist extensions.plist.sig; do
 	[ -f $IOS/rootfs/System/Library/xpc/$f ] && cp $IOS/rootfs/System/Library/xpc/$f root/xpc/
 done
+# (the reduced job cache, as for the system image below)
+if [ "${XPC_CACHE-0}" != 0 ]; then
+	python3 mkxpccache.py $IOS/rootfs/System/Library/xpc/launchd.plist root/LaunchDaemons root/xpc/launchd.plist || exit 1
+	[ "${XPC_SIG-1}" = 0 ] || cp $IOS/rootfs/System/Library/xpc/launchd.plist.sig root/xpc/
+fi
 [ -d root/lib/RedwoodAudio.driver ] && ln -s /redwood/lib/RedwoodAudio.driver root/hal/RedwoodAudio.driver
 # the image: zlib where it saves room (a small file whole in its attribute, as Apple keeps them); fw/
 # as it is, which the kernel's drivers use where it lies in memory (bsd/dev/redwood_image.c)
@@ -723,6 +762,16 @@ if [ -f $IOS/system.manifest ] && [ -f $CACHE/dyld_shared_cache_arm64 ] &&
 	# launchd must load our choice of jobs, not all 500 that iOS has
 	rm -rf sysroot/System/Library/LaunchDaemons sysroot/System/Library/NanoLaunchDaemons \
 		sysroot/System/Library/LaunchAngels sysroot/System/Library/xpc/launchd.plist
+	# ... but it learns of the frameworks' own XPC services (tonelibraryd and 190 more) only from its
+	# cache: a reduced one, our jobs and those (mkxpccache.py), with XPC_CACHE=1; XPC_SIG=0: without Apple's
+	# signature of the stock cache beside it. Off by default: with rd=md0 launchd skips its cache loader (a
+	# boot task of a real device) and reads the file itself, and said "Unable to parse MRM cache" of this one
+	# (rmx3360 run 68, 23 October 2026) -- the frameworks' services stay unknown either way.
+	if [ "${XPC_CACHE-0}" != 0 ]; then
+		python3 mkxpccache.py $IOS/rootfs/System/Library/xpc/launchd.plist root/LaunchDaemons \
+			sysroot/System/Library/xpc/launchd.plist || exit 1
+	fi
+	[ "${XPC_SIG-1}" = 0 ] && rm -f sysroot/System/Library/xpc/launchd.plist.sig
 	ln -s /redwood/LaunchDaemons sysroot/System/Library/LaunchDaemons
 	mkdir -p sysroot/redwood sysroot/sbin
 	# where the kernel mounts the iOS root container off the phone's flash (boot-arg apfs_volume=):

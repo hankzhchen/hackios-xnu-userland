@@ -289,6 +289,10 @@ for label in labels:
     job.pop('_LimitLoadToDeviceTree', None)
     if 'all' in oslog or label in oslog:
         job.setdefault('EnvironmentVariables', {})['OS_ACTIVITY_DT_MODE'] = 'YES'
+    # OSLOG_DEBUG="label ...": the info and debug levels as well (OS_ACTIVITY_MODE=debug), which is where
+    # a daemon says why it decided something (wifid's auto-join, for one); a great deal more on the console
+    if label in os.environ.get('OSLOG_DEBUG', '').split():
+        job.setdefault('EnvironmentVariables', {}).update({'OS_ACTIVITY_DT_MODE': 'YES', 'OS_ACTIVITY_MODE': 'debug'})
     with open(f'{dest}/{label}.plist', 'wb') as f:
         plistlib.dump(job, f, fmt=plistlib.FMT_BINARY)
     program = job.get('Program') or job['ProgramArguments'][0]
@@ -322,9 +326,11 @@ if rest:
         # it. The boot of 22 October showed what declining costs: SpringBoard's icons stopped being
         # drawn, because its layers ask for one of those formats and a refused texture is a layer
         # that never appears.
-        for name in ('RWA_PACKED16',):
-            if os.environ.get(name):
-                job.setdefault('EnvironmentVariables', {})[name] = os.environ[name]
+        # (not `name`: that is the plist's file name, used for writing it below -- reusing it here
+        # wrote every on-demand job to dest/RWA_PACKED16, one over the other, so none was left)
+        for variable in ('RWA_PACKED16',):
+            if os.environ.get(variable):
+                job.setdefault('EnvironmentVariables', {})[variable] = os.environ[variable]
         if label in oslog:
             job.setdefault('EnvironmentVariables', {})['OS_ACTIVITY_DT_MODE'] = 'YES'
         with open(f'{dest}/{name}', 'wb') as f:

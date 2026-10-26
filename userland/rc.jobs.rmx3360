@@ -1,0 +1,10 @@
+# Commands run by the launchd job com.redwood.demo (see com.redwood.demo.plist).
+# The Realme GT Master for everyday use (RC_JOBS=rc.jobs.rmx3360): nothing pressed by a script. The
+# package manager's prefix prepared (Sileo, tweaks), then, once Wi-Fi has an address, OpenSSH as in
+# rc.jobs.ssh: root with the key in ssh/authorized_keys, the host key from ssh/ (build.sh). Without
+# those files sshd says so and exits; the rest is unaffected.
+/redwood/bin/sound_test springboard
+/var/jb/bin/sh /var/jb/prep.sh
+/redwood/bin/net_test waitaddr en0 120
+/redwood/bin/net_test show
+/var/jb/usr/sbin/sshd -D -e -h /var/root/.ssh/ssh_host_ed25519_key -o UsePAM=no -o PasswordAuthentication=no -o PermitRootLogin=prohibit-password -o AuthorizedKeysFile=/var/root/.ssh/authorized_keys &

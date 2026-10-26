@@ -21,6 +21,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/file.h>
+#include <sys/syslimits.h>
 #include <unistd.h>
 
 extern const void *_dyld_get_shared_cache_range(size_t *length);
@@ -313,6 +315,34 @@ watched_copy_path(id self, SEL cmd, id from, id to, id *error)
 
 	return file_said("copyItemAtPath", ok, from, to, error != NULL ? *error : mine);
 }
+
+/*
+ * Safari holds /var/mobile/Library/Safari/com.apple.Bookmarks.lock while it opens the bookmarks on a cold
+ * start. Here that start is slow enough for Home to be pressed inside it, and RunningBoard then kills Safari
+ * for being suspended with a locked file outside its container (0xdead10cc). Take no lock on Safari's own
+ * lock files; SQLite's locking still guards the database itself.
+ */
+static int
+watched_flock(int fd, int op)
+{
+	char path[PATH_MAX];
+
+	if ((op & (LOCK_SH | LOCK_EX)) != 0 && fcntl(fd, F_GETPATH, path) == 0 &&
+	    strstr(path, "/Library/Safari/") != NULL && strstr(path, ".lock") != NULL) {
+		char line[PATH_MAX + 64];
+		int n = snprintf(line, sizeof(line), "redwood: %s: flock(%d) on %s skipped\n", who, op, path);
+
+		say(line, n > 0 && (size_t)n < sizeof(line) ? (size_t)n : 0);
+		return 0;
+	}
+	return flock(fd, op);
+}
+
+__attribute__((used)) static struct {
+	const void *ours, *theirs;
+} flock_interpose __attribute__((section("__DATA,__interpose"))) = {
+	(const void *)watched_flock, (const void *)flock
+};
 
 __attribute__((used)) static struct {
 	const void *ours, *theirs;

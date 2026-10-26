@@ -181,7 +181,16 @@ def mode_bits(text):
     return mode
 
 
+# Daemons that live inside a framework (not under Support/ or XPCServices/) and that something on the
+# way to the screen needs. sleepd (com.apple.sleepd.sleepserver): without it SpringBoard's HealthKit
+# sleep client (HKSPXPCConnectionProvider _retryPendingMessages) retries the lookup on the main queue
+# with no back-off -- some 3000 lookups a second on the RMX3360 at night, and touches went unanswered.
+KEEP_FRAMEWORK_PROGRAMS = ('System/Library/PrivateFrameworks/SleepDaemon.framework/sleepd',)
+
+
 def wanted_file(path, size):
+    if path in KEEP_FRAMEWORK_PROGRAMS:
+        return True
     lproj = re.search(r'/([^/]+)\.lproj/', path)
     if lproj and lproj.group(1) not in KEEP_LANG:
         return False
